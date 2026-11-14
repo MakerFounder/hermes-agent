@@ -20,12 +20,16 @@ from tools.approval_ansi_c import _is_shell_comment_start, expand_ansi_c_quotes
 from tools.approval_git_options import _GIT, _GIT_PUSH, _GIT_PUSH_ARGS, _join_escaped_word_chars
 from tools.approval_config_set import _HERMES_CONFIG_SET_APPROVAL_POLICY
 from tools.approval_env_split import _env_split_payload
-from tools.approval_fetch_exec import DownloadThenRunMatcher, heredoc_scan_sources
+from tools.approval_fetch_exec import (
+    _PIPE_PATH_PREFIX_RE,
+    _PIPE_WRAPPERS_RE,
+    DownloadThenRunMatcher,
+    heredoc_scan_sources,
+)
 from tools.approval_home_fold import _rewrite_resolved_hermes_home, _rewrite_resolved_user_home
 from tools.approval_shell_tokens import _shell_tokens_with_spans
 from tools.approval_windows_hardline import whatif_preview_is_real, windows_hardline_patterns, windows_whatif_strict_patterns
 from tools.approval_applescript import OSASCRIPT_OPAQUE_DESCRIPTION, OSASCRIPT_RISKY_DESCRIPTION, classify_osascript
-from tools.approval_pipe_launchers import _PIPE_LAUNCHER_VALUE_FLAGS, _pipe_launcher_re
 from tools.approval_quoted_newlines import _mask_quoted_newlines
 from tools.shell_heredoc import mask_heredoc_bodies_for_shell_scan
 
@@ -247,12 +251,6 @@ _SHELL_NAMES_RE = "|".join(_SHELL_NAMES)
 # groups, so each token has one parse and the scan stays linear; `sudo -u bash cat` reads `bash`
 # as the user, not the shell.
 _PIPE_SHELL_NAMES_RE = "|".join((*_SHELL_NAMES, "fish", "csh", "tcsh", "ash"))
-_PIPE_PATH_PREFIX_RE = r"(?>(?:[a-zA-Z]:)?(?:[.\w~-]*+[/\\])*+)"
-_PIPE_WRAPPERS_RE = (
-    rf"(?>{_PIPE_PATH_PREFIX_RE}(?:"
-    + "|".join(_pipe_launcher_re(n, *f) for n, f in _PIPE_LAUNCHER_VALUE_FLAGS.items())
-    + r")\s++)*+"
-)
 _PIPE_SHELL_TOKEN_RE = (
     rf"['\"]?{_PIPE_PATH_PREFIX_RE}(?:{_PIPE_SHELL_NAMES_RE})(?:\.exe)?(?=['\"\s;&|<>)`]|$)"
 )
