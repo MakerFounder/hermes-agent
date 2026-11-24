@@ -33,6 +33,7 @@ import {
 } from '@/store/prompts'
 import { rememberServerRequest } from '@/store/server-requests'
 import { $selectedStoredSessionId, $sessions, lineageAliases, sessionMatchesStoredId } from '@/store/session'
+import { $focusedStoredSessionId } from '@/store/session-focus'
 import {
   $sessionStates,
   $sessionTiles,
@@ -178,6 +179,23 @@ export function windowHostsSession(
 }
 
 /**
+ * The request's session is the tile the user is working in: an open tile bound
+ * to that runtime whose pane holds focus. The primary is not a tile, so
+ * requestNamesActiveSession covers it; a tile never becomes the active id, so
+ * without this a focused tile's own agent read as a background session and
+ * every drive_preview call was refused while the user sat in that chat.
+ */
+export function requestNamesFocusedTile(sessionId: string): boolean {
+  const focused = $focusedStoredSessionId.get()
+
+  if (!sessionId || !focused) {
+    return false
+  }
+
+  return $sessionTiles.get().some(tile => tile.runtimeId === sessionId && tile.storedSessionId === focused)
+}
+
+/**
  * The window.read claim. window.read has no per-window pane, but its answer is
  * keyed to the ANSWERING window's bounds — "below" is measured from them — so
  * the only window that may answer is one showing the conversation. The strict
@@ -194,8 +212,9 @@ export function windowHostsSession(
  * for that runtime, so a stale entry still maps within its own conversation.
  * No shown conversation — nothing claimed, as before.
  *
- * Scoped to window.read only. preview.act and tour refuse unless
- * isActiveSession (raw id equality), so a tolerated claim there would turn
+ * Scoped to window.read only. preview.act and tour refuse unless the session
+ * is on screen (isActiveSession; preview.act also a focused tile), so a
+ * tolerated claim there would turn
  * another window's silence into a false refusal that wins the multi-window
  * race — and a tour refusal latches session["tour_bridge"] = "answered",
  * converting every later tour action in the session into a full 45s wait.
@@ -464,8 +483,9 @@ const previewRead: Handler = ({ request, sessionId }) => {
 }
 
 const previewAct: Handler = ({ deps, isActiveSession, request, sessionId }) => {
-  // drive_preview tool: click/type/scroll/press inside the guest page. Active
-  // session only: a background turn (including one in a tile this window hosts)
+  // drive_preview tool: click/type/scroll/press inside the guest page. Only the
+  // session the user is looking at — the primary, or the tile whose pane holds
+  // focus: a background turn (including an unfocused tile this window hosts)
   // must never reach into the page the user is working in (desktop AGENTS.md:
   // offer, don't hijack). Window ownership is settled by WINDOW_OWNED_REQUESTS
   // before this runs, so a refusal here reaches the tool instead of stalling it.
@@ -482,11 +502,13 @@ const previewAct: Handler = ({ deps, isActiveSession, request, sessionId }) => {
       const storedIdForRuntimeId = (runtimeId: string) =>
         deps.sessionStateByRuntimeIdRef.current.get(runtimeId)?.storedSessionId ?? undefined
 
-      return requestNamesActiveSession({
-        activeSessionId: deps.activeSessionIdRef.current,
-        sessionId,
-        storedIdForRuntimeId
-      })
+      return (
+        requestNamesActiveSession({
+          activeSessionId: deps.activeSessionIdRef.current,
+          sessionId,
+          storedIdForRuntimeId
+        }) || requestNamesFocusedTile(sessionId)
+      )
     }
 
     const watch = sessionId
@@ -581,7 +603,7 @@ const previewAct: Handler = ({ deps, isActiveSession, request, sessionId }) => {
     return
   }
 
-  if (!isActiveSession) {
+  if (!isActiveSession && !requestNamesFocusedTile(sessionId)) {
     answerValue(request, {
       error: 'The in-app browser only takes actions in the session the user is looking at.',
       success: false

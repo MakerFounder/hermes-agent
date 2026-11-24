@@ -695,6 +695,67 @@ describe('preview requests act for the session that asked (#73890)', () => {
     }
   })
 
+  // A tile never becomes the active id, so its agent read as a background
+  // session and was refused while the user sat in that very chat.
+  it("lets the focused tile's own agent drive its page", async () => {
+    openPreview({ kind: 'url', label: 'a', source: 'https://a.example', url: 'https://a.example' }, 'stored-a')
+    openPreview({ kind: 'url', label: 'b', source: 'https://b.example', url: 'https://b.example' }, 'stored-b')
+    const [a, b] = $previewTabs.get()
+    const backA = vi.fn()
+    const backB = vi.fn()
+
+    const unbind = [
+      registerPreviewNav(a!.id, { back: backA, forward: () => {}, reload: () => {} }),
+      registerPreviewNav(b!.id, { back: backB, forward: () => {}, reload: () => {} })
+    ]
+
+    focusTileB()
+
+    try {
+      const { respond } = deliver('preview.act', { action: 'back', session_id: 'rt-b' }, 'rt-a')
+
+      await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1), { timeout: 30_000 })
+      expect(JSON.parse(respond.mock.calls[0][0].value)).toMatchObject({ acted: 'back', success: true })
+      expect(backB).toHaveBeenCalledTimes(1)
+      expect(backA).not.toHaveBeenCalled()
+    } finally {
+      unbind.forEach(stop => stop())
+    }
+  })
+
+  it('still refuses a tile the user is not focused on', () => {
+    // No tile focused: the user is in the primary, so tile B's turn is background.
+    const { decline, respond } = deliver('preview.act', { action: 'back', session_id: 'rt-b' }, 'rt-a')
+
+    expect(decline).not.toHaveBeenCalled()
+    expect(JSON.parse(respond.mock.calls[0][0].value)).toMatchObject({
+      error: 'The in-app browser only takes actions in the session the user is looking at.',
+      success: false
+    })
+  })
+
+  it("opens a vault binding for the focused tile's own agent", async () => {
+    requestPopoutPreviewVault.mockClear()
+    requestPopoutPreviewVault.mockResolvedValue({ success: true, target: 'bind-b' })
+    hasLivePreviewSurface.mockReturnValue(false)
+    deps.activeSessionIdRef.current = 'rt-a'
+    focusTileB()
+
+    try {
+      const { respond } = deliver(
+        'preview.act',
+        { action: 'vault', session_id: 'rt-b', vault: { operation: 'open' } },
+        'rt-a'
+      )
+
+      await vi.waitFor(() => expect(respond).toHaveBeenCalledTimes(1), { timeout: 30_000 })
+      expect(JSON.parse(respond.mock.calls[0][0].value)).toMatchObject({ success: true, target: 'bind-b' })
+    } finally {
+      deps.activeSessionIdRef.current = null
+      requestPopoutPreviewVault.mockResolvedValue(null)
+    }
+  })
+
   it("runs a preview tour against the requesting session's tabs", async () => {
     focusTileB()
     vi.mocked(runTour).mockClear()
